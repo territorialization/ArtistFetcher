@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>weight::gallery</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #131317; color: #e8e6e3;
+    font-family: 'Pretendard', -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif; }
+  #topbar { position: sticky; top: 0; z-index: 10;
+    background: rgba(19,19,23,.93); backdrop-filter: blur(6px);
+    border-bottom: 1px solid #26262e; padding: 8px 10px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .title { font-size: 14px; font-weight: 700; letter-spacing: .5px; }
+  .title em { color: #f0a94b; font-style: normal; }
+  .count { font-size: 11px; color: #6b6b76; }
+  .spacer { flex: 1; }
+  select, button { background: #1a1a20; color: #cfcdc9; border: 1px solid #2e2e38;
+    border-radius: 5px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
+  button.primary { background: #f0a94b; color: #131317; border: none;
+    font-weight: 700; font-size: 12px; padding: 6px 14px; }
+  textarea { width: 100%; margin-top: 8px; background: #1a1a20; color: #cfcdc9;
+    border: 1px solid #2e2e38; border-radius: 6px; padding: 8px;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; resize: vertical; }
+  .artist-row { border-bottom: 1px solid #26262e; }
+  .row-head { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px 3px; }
+  .weight { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700; min-width: 38px; }
+  .aname { color: #e8e6e3; font-size: 13px; font-weight: 600; text-decoration: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .aname:hover { color: #f0a94b; }
+  .wbar { flex: 1; height: 3px; background: #26262e; border-radius: 2px;
+    align-self: center; overflow: hidden; }
+  .wbar > div { height: 100%; border-radius: 2px; opacity: .7; }
+  .pcount { font-size: 10px; color: #6b6b76; font-family: monospace; }
+  .strip { display: flex; gap: 4px; overflow-x: auto; padding: 0 10px 6px;
+    align-items: center; scrollbar-width: thin; }
+  .strip a { flex-shrink: 0; }
+  .strip img { object-fit: cover; border-radius: 3px; display: block; background: #1a1a20; }
+  .msg { color: #6b6b76; font-size: 12px; }
+  .err { color: #d07a7a; font-size: 12px; }
+  footer { padding: 10px 12px 20px; font-size: 10px; color: #4c4c55; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="bar-row">
+    <span class="title">weight<em>::</em>gallery</span>
+    <span class="count" id="count"></span>
+    <div class="spacer"></div>
+    <select id="rating">
+      <option value="g">전연령 (rating:g)</option>
+      <option value="g,s">일반+민감 (g,s)</option>
+      <option value="all">전체 등급</option>
+    </select>
+    <select id="limit">
+      <option value="8">8장</option>
+      <option value="15" selected>15장</option>
+      <option value="20">20장</option>
+    </select>
+    <select id="thumbH">
+      <option value="80">썸네일 소</option>
+      <option value="110" selected>썸네일 중</option>
+      <option value="150">썸네일 대</option>
+    </select>
+    <button id="toggleInput">입력 접기</button>
+  </div>
+  <div id="inputArea">
+    <textarea id="prompt" rows="5" spellcheck="false"
+      placeholder="예: 1.8::artist:ask::, 1.2::sonao::, aono (f i s), 0.5::aoi ogata::"></textarea>
+    <button class="primary" id="run" style="margin-top:6px">검색 →</button>
+  </div>
+</div>
+<div id="rows"></div>
+<footer>Danbooru 공개 API · 썸네일 클릭 시 원본 포스트 · 가중치 내림차순</footer>
+<script>
+const DEFAULT_INPUT = `1.8::artist:ask::, 1.7::artist:kimhiro ::, 1.6::noyu (noyu23386566)::, 1.5::sumiyao (amam)::, 1.4::wanke ::, 1.25::artist:modare ::, 1.2::artist:sonao ::, aono (f i s), 1.15::deadnooodles ::, 1.1::zeka (skzk cm) ::, 1.05::artist:yoya yogurt::, 1::artist:nanmokaken, artist:necomi, artist:weri, artist:doremi (doremi4704), artist:hone kawa, artist:umehara sei::, 0.8::z3zz4 ::, 0.8::channel (caststation) ::, 0.75::hito komoru::, 0.7::artist:pepq::, 0.65::cogecha ::, 0.6::mika pikazo ::, 0.5:: aoi ogata::, 0.3::artist:chen bin::, 0.2:: quasarcake::`;
+
+function parsePrompt(input) {
+  const results = [];
+  const groupRe = /([\d.]+)\s*::([\s\S]*?)::/g;
+  const consumed = [];
+  let m;
+  while ((m = groupRe.exec(input)) !== null) {
+    const weight = parseFloat(m[1]);
+    m[2].split(',').map(t => t.trim()).filter(Boolean)
+      .forEach(t => results.push({ raw: t, weight }));
+    consumed.push([m.index, m.index + m[0].length]);
+  }
+  let leftover = '', cursor = 0;
+  consumed.sort((a, b) => a[0] - b[0]);
+  for (const [s, e] of consumed) { leftover += input.slice(cursor, s); cursor = e; }
+  leftover += input.slice(cursor);
+  leftover.split(',').map(t => t.trim()).filter(Boolean)
+    .forEach(t => results.push({ raw: t, weight: 1.0 }));
+  const seen = new Set(), out = [];
+  for (const r of results) {
+    const name = r.raw.replace(/^artist:\s*/i, '').trim();
+    if (!name) continue;
+    const tag = name.replace(/\s+/g, '_');
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push({ tag, weight: r.weight });
+  }
+  out.sort((a, b) => b.weight - a.weight);
+  return out;
+}
+
+function weightColor(w, max) {
+  const t = Math.max(0, Math.min(1, w / (max || 2)));
+  const hue = 210 - t * 175;
+  return `hsl(${hue} ${40 + t * 55}% ${55 + t * 8}%)`;
+}
+
+const queue = [];
+let active = 0;
+function enqueue(fn) {
+  return new Promise((res, rej) => { queue.push({ fn, res, rej }); pump(); });
+}
+function pump() {
+  while (active < 2 && queue.length) {
+    const { fn, res, rej } = queue.shift();
+    active++;
+    fn().then(res, rej).finally(() => {
+      setTimeout(() => { active--; pump(); }, 400);
+    });
+  }
+}
+
+async function fetchArtist(tag, rating, limit) {
+  const ratingPart = rating === 'all' ? '' : '+rating%3A' + encodeURIComponent(rating);
+  const url = `https://danbooru.donmai.us/posts.json?tags=${encodeURIComponent(tag)}${ratingPart}&limit=${limit}`;
+  const res = await fetch(url);
+  if (res.status === 429) throw new Error('요청 제한(429) — 잠시 후 새로고침');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const posts = await res.json();
+  return posts.map(p => {
+    const variants = (p.media_asset && p.media_asset.variants) || [];
+    const v = variants.find(v => v.type === '360x360');
+    const thumb = (v && v.url) || p.preview_file_url;
+    if (!thumb) return null;
+    return { id: p.id, thumb, w: (v && v.width) || p.image_width, h: (v && v.height) || p.image_height };
+  }).filter(Boolean);
+}
+
+const rowsEl = document.getElementById('rows');
+const ratingEl = document.getElementById('rating');
+const limitEl = document.getElementById('limit');
+const thumbHEl = document.getElementById('thumbH');
+const promptEl = document.getElementById('prompt');
+let observer;
+
+function render() {
+  if (observer) observer.disconnect();
+  rowsEl.innerHTML = '';
+  const artists = parsePrompt(promptEl.value);
+  document.getElementById('count').textContent = artists.length + '명';
+  const maxW = artists.reduce((m, a) => Math.max(m, a.weight), 0);
+  const thumbH = +thumbHEl.value;
+  observer = new IntersectionObserver(entries => {
+    for (const ent of entries) {
+      if (!ent.isIntersecting) continue;
+      observer.unobserve(ent.target);
+      loadRow(ent.target);
+    }
+  }, { rootMargin: '600px' });
+  for (const a of artists) {
+    const col = weightColor(a.weight, maxW);
+    const row = document.createElement('div');
+    row.className = 'artist-row';
+    row.dataset.tag = a.tag;
+    row.innerHTML = `
+      <div class="row-head">
+        <span class="weight" style="color:${col}">${a.weight.toFixed(2)}</span>
+        <a class="aname" target="_blank"
+           href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(a.tag)}">${a.tag.replace(/_/g, ' ')}</a>
+        <div class="wbar"><div style="width:${Math.min(100, a.weight / (maxW || 2) * 100)}%;background:${col}"></div></div>
+        <span class="pcount"></span>
+      </div>
+      <div class="strip" style="min-height:${thumbH}px"><span class="msg">대기 중…</span></div>`;
+    rowsEl.appendChild(row);
+    observer.observe(row);
+  }
+  if (!artists.length) {
+    rowsEl.innerHTML = '<p class="msg" style="padding:20px">태그를 입력하고 검색을 눌러줘.</p>';
+  }
+}
+
+function loadRow(row) {
+  const tag = row.dataset.tag;
+  const strip = row.querySelector('.strip');
+  const pcount = row.querySelector('.pcount');
+  const thumbH = +thumbHEl.value;
+  strip.innerHTML = '<span class="msg">불러오는 중…</span>';
+  enqueue(() => fetchArtist(tag, ratingEl.value, +limitEl.value))
+    .then(posts => {
+      pcount.textContent = posts.length + '장';
+      if (!posts.length) {
+        strip.innerHTML = '<span class="msg">결과 없음 (등급 필터 때문일 수 있음)</span>';
+        return;
+      }
+      strip.innerHTML = '';
+      for (const p of posts) {
+        const a = document.createElement('a');
+        a.href = 'https://danbooru.donmai.us/posts/' + p.id;
+        a.target = '_blank';
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = p.thumb;
+        img.style.height = thumbH + 'px';
+        if (p.w && p.h) img.style.width = (thumbH * p.w / p.h) + 'px';
+        a.appendChild(img);
+        strip.appendChild(a);
+      }
+    })
+    .catch(e => { strip.innerHTML = `<span class="err">로드 실패 (${e.message})</span>`; });
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  render();
+  document.getElementById('inputArea').style.display = 'none';
+  document.getElementById('toggleInput').textContent = '태그 입력';
+});
+document.getElementById('toggleInput').addEventListener('click', () => {
+  const area = document.getElementById('inputArea');
+  const hidden = area.style.display === 'none';
+  area.style.display = hidden ? '' : 'none';
+  document.getElementById('toggleInput').textContent = hidden ? '입력 접기' : '태그 입력';
+});
+[ratingEl, limitEl, thumbHEl].forEach(el => el.addEventListener('change', render));
+promptEl.value = DEFAULT_INPUT;
+render();
+</script>
+</body>
+</html>
