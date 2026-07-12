@@ -26,7 +26,7 @@
     font-family: ui-monospace, Consolas, monospace; font-size: 12px; resize: vertical; }
   .artist-row { border-bottom: 1px solid #26262e; }
   .row-head { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px 3px; }
-  .weight { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700; min-width: 38px; }
+  .weight { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700; min-width: 42px; }
   .aname { color: #e8e6e3; font-size: 13px; font-weight: 600; text-decoration: none;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .aname:hover { color: #f0a94b; }
@@ -76,24 +76,10 @@
 <script>
 // {} / [] 중첩을 인식해서 태그별 가중치 배율을 계산하며 쪼개기
 function splitBraces(text, baseMult) {
-  const items = [];
-  let depthStack = [];
-  let buf = '';
-  let i = 0;
-  function flush() {
-    const t = buf.trim();
-    if (t) {
-      let mult = baseMult;
-      for (const d of depthStack) mult *= d === '{' ? 1.05 : 1 / 1.05;
-      items.push({ raw: t, mult });
-    }
-    buf = '';
-  }
-  // 현재 깊이 스냅샷을 태그별로 적용하기 위해 문자 단위 파싱
   const out = [];
   let stack = [];
-  buf = '';
-  const flush2 = () => {
+  let buf = '';
+  const flush = () => {
     const t = buf.trim();
     if (t) {
       let mult = baseMult;
@@ -102,20 +88,20 @@ function splitBraces(text, baseMult) {
     }
     buf = '';
   };
-  for (i = 0; i < text.length; i++) {
+  for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (c === '{' || c === '[') { flush2(); stack.push(c); }
-    else if (c === '}' || c === ']') { flush2(); stack.pop(); }
-    else if (c === ',') { flush2(); }
+    if (c === '{' || c === '[') { flush(); stack.push(c); }
+    else if (c === '}' || c === ']') { flush(); stack.pop(); }
+    else if (c === ',') { flush(); }
     else buf += c;
   }
-  flush2();
+  flush();
   return out;
 }
 
 function parsePrompt(input) {
   const results = [];
-  const groupRe = /([\d.]+)\s*::([\s\S]*?)::/g;
+  const groupRe = /(-?[\d.]+)\s*::([\s\S]*?)::/g;
   const consumed = [];
   let m;
   while ((m = groupRe.exec(input)) !== null) {
@@ -143,6 +129,7 @@ function parsePrompt(input) {
 }
 
 function weightColor(w, max) {
+  if (w < 0) return '#d07a7a';
   const t = Math.max(0, Math.min(1, w / (max || 2)));
   const hue = 210 - t * 175;
   return `hsl(${hue} ${40 + t * 55}% ${55 + t * 8}%)`;
@@ -210,7 +197,7 @@ function render() {
         <span class="weight" style="color:${col}">${a.weight.toFixed(2)}</span>
         <a class="aname" target="_blank"
            href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(a.tag)}">${a.tag.replace(/_/g, ' ')}</a>
-        <div class="wbar"><div style="width:${Math.min(100, a.weight / (maxW || 2) * 100)}%;background:${col}"></div></div>
+        <div class="wbar"><div style="width:${Math.min(100, Math.abs(a.weight) / (maxW || 2) * 100)}%;background:${col}"></div></div>
         <span class="pcount"></span>
       </div>
       <div class="strip" style="min-height:${thumbH}px"><span class="msg">대기 중…</span></div>`;
