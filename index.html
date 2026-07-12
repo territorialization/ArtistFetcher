@@ -50,9 +50,9 @@
     <span class="count" id="count"></span>
     <div class="spacer"></div>
     <select id="rating">
+      <option value="all" selected>전체 등급</option>
       <option value="g">전연령 (rating:g)</option>
       <option value="g,s">일반+민감 (g,s)</option>
-      <option value="all">전체 등급</option>
     </select>
     <select id="limit">
       <option value="8">8장</option>
@@ -67,16 +67,13 @@
     <button id="toggleInput">입력 접기</button>
   </div>
   <div id="inputArea">
-    <textarea id="prompt" rows="5" spellcheck="false"
-      placeholder="예: 1.8::artist:ask::, 1.2::sonao::, aono (f i s), 0.5::aoi ogata::"></textarea>
+    <textarea id="prompt" rows="5" spellcheck="false"></textarea>
     <button class="primary" id="run" style="margin-top:6px">검색 →</button>
   </div>
 </div>
 <div id="rows"></div>
 <footer>Danbooru 공개 API · 썸네일 클릭 시 원본 포스트 · 가중치 내림차순</footer>
 <script>
-const DEFAULT_INPUT = `1.8::artist:ask::, 1.7::artist:kimhiro ::, 1.6::noyu (noyu23386566)::, 1.5::sumiyao (amam)::, 1.4::wanke ::, 1.25::artist:modare ::, 1.2::artist:sonao ::, aono (f i s), 1.15::deadnooodles ::, 1.1::zeka (skzk cm) ::, 1.05::artist:yoya yogurt::, 1::artist:nanmokaken, artist:necomi, artist:weri, artist:doremi (doremi4704), artist:hone kawa, artist:umehara sei::, 0.8::z3zz4 ::, 0.8::channel (caststation) ::, 0.75::hito komoru::, 0.7::artist:pepq::, 0.65::cogecha ::, 0.6::mika pikazo ::, 0.5:: aoi ogata::, 0.3::artist:chen bin::, 0.2:: quasarcake::`;
-
 function parsePrompt(input) {
   const results = [];
   const groupRe = /([\d.]+)\s*::([\s\S]*?)::/g;
@@ -155,7 +152,7 @@ function render() {
   if (observer) observer.disconnect();
   rowsEl.innerHTML = '';
   const artists = parsePrompt(promptEl.value);
-  document.getElementById('count').textContent = artists.length + '명';
+  document.getElementById('count').textContent = artists.length ? artists.length + '명' : '';
   const maxW = artists.reduce((m, a) => Math.max(m, a.weight), 0);
   const thumbH = +thumbHEl.value;
   observer = new IntersectionObserver(entries => {
@@ -182,9 +179,6 @@ function render() {
     rowsEl.appendChild(row);
     observer.observe(row);
   }
-  if (!artists.length) {
-    rowsEl.innerHTML = '<p class="msg" style="padding:20px">태그를 입력하고 검색을 눌러줘.</p>';
-  }
 }
 
 function loadRow(row) {
@@ -197,7 +191,7 @@ function loadRow(row) {
     .then(posts => {
       pcount.textContent = posts.length + '장';
       if (!posts.length) {
-        strip.innerHTML = '<span class="msg">결과 없음 (등급 필터 때문일 수 있음)</span>';
+        strip.innerHTML = '<span class="msg">결과 없음</span>';
         return;
       }
       strip.innerHTML = '';
@@ -229,8 +223,6 @@ document.getElementById('toggleInput').addEventListener('click', () => {
   document.getElementById('toggleInput').textContent = hidden ? '입력 접기' : '태그 입력';
 });
 [ratingEl, limitEl, thumbHEl].forEach(el => el.addEventListener('change', render));
-promptEl.value = DEFAULT_INPUT;
-render();
 </script>
 </body>
 </html>
