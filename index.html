@@ -21,17 +21,21 @@
     border-radius: 5px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
   button.primary { background: #f0a94b; color: #131317; border: none;
     font-weight: 700; font-size: 12px; padding: 6px 14px; }
+  button.active { background: #f0a94b; color: #131317; border-color: #f0a94b; }
   textarea { width: 100%; margin-top: 8px; background: #1a1a20; color: #cfcdc9;
     border: 1px solid #2e2e38; border-radius: 6px; padding: 8px;
     font-family: ui-monospace, Consolas, monospace; font-size: 12px; resize: vertical; }
   .artist-row { border-bottom: 1px solid #26262e; }
-  .row-head { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px 3px; }
+  .row-head { display: flex; align-items: center; gap: 6px; padding: 5px 10px 3px; }
   .weight { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700; min-width: 42px; }
+  .wbtn { padding: 1px 7px; font-size: 13px; font-weight: 700; border-radius: 4px; line-height: 1.4; }
+  .star { background: none; border: none; font-size: 15px; padding: 0 2px; color: #4c4c55; }
+  .star.on { color: #f0a94b; }
   .aname { color: #e8e6e3; font-size: 13px; font-weight: 600; text-decoration: none;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .aname:hover { color: #f0a94b; }
   .wbar { flex: 1; height: 3px; background: #26262e; border-radius: 2px;
-    align-self: center; overflow: hidden; }
+    align-self: center; overflow: hidden; min-width: 30px; }
   .wbar > div { height: 100%; border-radius: 2px; opacity: .7; }
   .pcount { font-size: 10px; color: #6b6b76; font-family: monospace; }
   .strip { display: flex; gap: 4px; overflow-x: auto; padding: 0 10px 6px;
@@ -64,6 +68,9 @@
       <option value="110" selected>썸네일 중</option>
       <option value="150">썸네일 대</option>
     </select>
+    <button id="bookmarkBtn">★ 북마크</button>
+    <button id="sortBtn">정렬</button>
+    <button id="copyBtn">복사</button>
     <button id="toggleInput">입력 접기</button>
   </div>
   <div id="inputArea">
@@ -72,9 +79,8 @@
   </div>
 </div>
 <div id="rows"></div>
-<footer>Danbooru 공개 API · 썸네일 클릭 시 원본 포스트 · 가중치 내림차순</footer>
+<footer>Danbooru 공개 API · ☆로 작가 북마크 · −/+ 조정 시 프롬프트 자동 갱신</footer>
 <script>
-// {} / [] 중첩을 인식해서 태그별 가중치 배율을 계산하며 쪼개기
 function splitBraces(text, baseMult) {
   const out = [];
   let stack = [];
@@ -124,7 +130,6 @@ function parsePrompt(input) {
     seen.add(tag);
     out.push({ tag, weight: r.weight });
   }
-  out.sort((a, b) => b.weight - a.weight);
   return out;
 }
 
@@ -133,6 +138,22 @@ function weightColor(w, max) {
   const t = Math.max(0, Math.min(1, w / (max || 2)));
   const hue = 210 - t * 175;
   return `hsl(${hue} ${40 + t * 55}% ${55 + t * 8}%)`;
+}
+
+// ---------- 북마크 (localStorage) ----------
+function getBookmarks() {
+  try { return JSON.parse(localStorage.getItem('wg_bookmarks') || '[]'); }
+  catch { return []; }
+}
+function setBookmarks(list) {
+  localStorage.setItem('wg_bookmarks', JSON.stringify(list));
+}
+function toggleBookmark(tag) {
+  const list = getBookmarks();
+  const i = list.indexOf(tag);
+  if (i >= 0) list.splice(i, 1); else list.push(tag);
+  setBookmarks(list);
+  return i < 0; // 새로 켜졌으면 true
 }
 
 const queue = [];
@@ -171,15 +192,44 @@ const ratingEl = document.getElementById('rating');
 const limitEl = document.getElementById('limit');
 const thumbHEl = document.getElementById('thumbH');
 const promptEl = document.getElementById('prompt');
+const bookmarkBtn = document.getElementById('bookmarkBtn');
+let artists = [];
+let bookmarkMode = false;
 let observer;
+
+function maxWeight() { return artists.reduce((m, a) => Math.max(m, a.weight), 0); }
+function fmt(w) { return (Math.round(w * 100) / 100).toString(); }
+
+function syncPrompt() {
+  if (bookmarkMode) return; // 북마크 보기에서는 입력란 건드리지 않음
+  promptEl.value = artists
+    .map(a => `${fmt(a.weight)}::${a.tag.replace(/_/g, ' ')}::`)
+    .join(', ');
+}
+
+function updateRowVisual(row, a) {
+  const maxW = maxWeight();
+  const col = weightColor(a.weight, maxW);
+  row.querySelector('.weight').textContent = a.weight.toFixed(2);
+  row.querySelector('.weight').style.color = col;
+  const bar = row.querySelector('.wbar > div');
+  bar.style.width = Math.min(100, Math.abs(a.weight) / (maxW || 2) * 100) + '%';
+  bar.style.background = col;
+}
+
+function refreshAllVisuals() {
+  for (const row of rowsEl.children) {
+    const a = artists.find(x => x.tag === row.dataset.tag);
+    if (a) updateRowVisual(row, a);
+  }
+}
 
 function render() {
   if (observer) observer.disconnect();
   rowsEl.innerHTML = '';
-  const artists = parsePrompt(promptEl.value);
   document.getElementById('count').textContent = artists.length ? artists.length + '명' : '';
-  const maxW = artists.reduce((m, a) => Math.max(m, a.weight), 0);
   const thumbH = +thumbHEl.value;
+  const bms = getBookmarks();
   observer = new IntersectionObserver(entries => {
     for (const ent of entries) {
       if (!ent.isIntersecting) continue;
@@ -187,22 +237,43 @@ function render() {
       loadRow(ent.target);
     }
   }, { rootMargin: '600px' });
+
   for (const a of artists) {
-    const col = weightColor(a.weight, maxW);
     const row = document.createElement('div');
     row.className = 'artist-row';
     row.dataset.tag = a.tag;
+    const starred = bms.includes(a.tag);
     row.innerHTML = `
       <div class="row-head">
-        <span class="weight" style="color:${col}">${a.weight.toFixed(2)}</span>
+        <button class="star ${starred ? 'on' : ''}">${starred ? '★' : '☆'}</button>
+        <span class="weight"></span>
+        <button class="wbtn" data-d="-1">−</button>
+        <button class="wbtn" data-d="1">＋</button>
         <a class="aname" target="_blank"
            href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(a.tag)}">${a.tag.replace(/_/g, ' ')}</a>
-        <div class="wbar"><div style="width:${Math.min(100, Math.abs(a.weight) / (maxW || 2) * 100)}%;background:${col}"></div></div>
+        <div class="wbar"><div></div></div>
         <span class="pcount"></span>
       </div>
       <div class="strip" style="min-height:${thumbH}px"><span class="msg">대기 중…</span></div>`;
+    updateRowVisual(row, a);
+    row.querySelector('.star').addEventListener('click', function () {
+      const on = toggleBookmark(row.dataset.tag);
+      this.textContent = on ? '★' : '☆';
+      this.classList.toggle('on', on);
+    });
+    row.querySelectorAll('.wbtn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const art = artists.find(x => x.tag === row.dataset.tag);
+        art.weight = Math.round((art.weight + 0.05 * (+btn.dataset.d)) * 100) / 100;
+        refreshAllVisuals();
+        syncPrompt();
+      });
+    });
     rowsEl.appendChild(row);
     observer.observe(row);
+  }
+  if (bookmarkMode && !artists.length) {
+    rowsEl.innerHTML = '<p class="msg" style="padding:20px">북마크한 작가가 없어. 작가 줄의 ☆를 눌러 추가해봐.</p>';
   }
 }
 
@@ -236,7 +307,38 @@ function loadRow(row) {
     .catch(e => { strip.innerHTML = `<span class="err">로드 실패 (${e.message})</span>`; });
 }
 
+// 북마크 보기 토글
+bookmarkBtn.addEventListener('click', () => {
+  bookmarkMode = !bookmarkMode;
+  bookmarkBtn.classList.toggle('active', bookmarkMode);
+  if (bookmarkMode) {
+    artists = getBookmarks().map(tag => ({ tag, weight: 1.0 }));
+  } else {
+    artists = parsePrompt(promptEl.value);
+  }
+  render();
+});
+
+document.getElementById('sortBtn').addEventListener('click', () => {
+  artists.sort((a, b) => b.weight - a.weight);
+  for (const a of artists) {
+    const row = rowsEl.querySelector(`[data-tag="${CSS.escape(a.tag)}"]`);
+    if (row) rowsEl.appendChild(row);
+  }
+  syncPrompt();
+});
+
+document.getElementById('copyBtn').addEventListener('click', function () {
+  navigator.clipboard.writeText(promptEl.value).then(() => {
+    this.textContent = '복사됨!';
+    setTimeout(() => { this.textContent = '복사'; }, 1200);
+  });
+});
+
 document.getElementById('run').addEventListener('click', () => {
+  bookmarkMode = false;
+  bookmarkBtn.classList.remove('active');
+  artists = parsePrompt(promptEl.value);
   render();
   document.getElementById('inputArea').style.display = 'none';
   document.getElementById('toggleInput').textContent = '태그 입력';
